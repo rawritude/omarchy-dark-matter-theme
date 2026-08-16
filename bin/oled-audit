@@ -1,0 +1,282 @@
+#!/usr/bin/env python3
+"""Audit a live Omarchy desktop for what is costing OLED panel life.
+
+OLED wear is luminance integrated over time, so the things that matter are the
+bright things that never move. This walks the four that a desktop actually
+controls -- wallpaper, window borders, theme foreground, and the status bar --
+measures each, and reports what it found rather than what it assumes.
+
+It changes nothing. Run it, read it, decide for yourself.
+
+    oled-audit            # human-readable report
+    oled-audit --json     # machine-readable, for scripting
+"""
+
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tomllib
+from pathlib import Path
+
+HOME = Path.home()
+STATE = HOME / ".local/state/omarchy"
+
+# sRGB -> relative luminance. The gamma curve matters here: a #808080 pixel is
+# half-bright to the eye but emits about a fifth of the light of white, and
+# guessing linearly would overstate every mid-grey in the report.
+def _lin(c: float) -> float:
+    c /= 255.0
+    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+
+def luminance(hex_colour: str) -> float:
+    h = hex_colour.lstrip("#")
+    if len(h) == 8:  # AARRGGBB or RRGGBBAA from hyprland
+        h = h[2:] if h[:2] not in ("ff",) else h[2:]
+    if len(h) != 6:
+        return 0.0
+    r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+    return 0.2126 * _lin(r) + 0.7152 * _lin(g) + 0.0722 * _lin(b)
+
+
+def contrast_on_black(hex_colour: str) -> float:
+    return (luminance(hex_colour) + 0.05) / 0.05
+
+
+def run(cmd) -> str:
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=10).stdout
+    except Exception:
+        return ""
+
+
+def have(binary: str) -> bool:
+    return shutil.which(binary) is not None
+
+
+# --------------------------------------------------------------------- probes
+
+def probe_wallpaper() -> dict:
+    """Mean luminance and, more importantly, how much of it is near-white.
+
+    Mean alone is misleading. A dim, evenly-lit photograph and a black image
+    scattered with white dots can share a mean while behaving completely
+    differently: diffuse light spreads wear, concentrated static peaks
+    accumulate it in fixed pixels. Both numbers are reported for that reason.
+    """
+    link = STATE / "current/background"
+    if not link.exists():
+        return {"available": False, "reason": "no current background"}
+    path = Path(os.path.realpath(link))
+    if not path.exists():
+        return {"available": False, "reason": f"background missing: {path}"}
+    if not have("magick"):
+        return {"available": False, "reason": "imagemagick not installed", "path": str(path)}
+
+    mean = run(["magick", str(path), "-colorspace", "gray",
+                "-format", "%[fx:mean]", "info:"]).strip()
+    near_white = run(["magick", str(path), "-colorspace", "gray", "-threshold", "90%",
+                      "-format", "%[fx:mean]", "info:"]).strip()
+    try:
+        mean_f, nw_f = float(mean), float(near_white)
+    except ValueError:
+        return {"available": False, "reason": "could not measure", "path": str(path)}
+
+    return {
+        "available": True,
+        "path": str(path),
+        "name": path.name,
+        "mean_luminance_pct": round(mean_f * 100, 2),
+        "near_white_pct": round(nw_f * 100, 3),
+    }
+
+
+def probe_borders() -> dict:
+    """Window borders: thin, but long, and static for as long as the layout is."""
+    if not have("hyprctl"):
+        return {"available": False, "reason": "hyprctl not found"}
+
+    def colour_of(option: str):
+        out = run(["hyprctl", "getoption", f"general:{option}"])
+        m = re.search(r"([0-9a-f]{8})", out)
+        return m.group(1) if m else None
+
+    active = colour_of("col.active_border")
+    inactive = colour_of("col.inactive_border")
+    size = re.search(r"int:\s*(\d+)", run(["hyprctl", "getoption", "general:border_size"]))
+
+    result = {"available": True, "border_size": int(size.group(1)) if size else None}
+    for label, raw in (("active", active), ("inactive", inactive)):
+        if not raw:
+            continue
+        # hyprland reports AARRGGBB
+        alpha, rgb = int(raw[:2], 16) / 255.0, "#" + raw[2:]
+        result[label] = {
+            "hex": rgb,
+            "alpha": round(alpha, 2),
+            # Alpha composites against a black desktop, so effective emission
+            # is the colour's luminance scaled by how opaque it is.
+            "effective_luminance": round(luminance(rgb) * alpha, 4),
+        }
+    return result
+
+
+def probe_theme() -> dict:
+    """Foreground and accent: body text is the largest continuously-lit area."""
+    link = STATE / "current/theme"
+    colours_path = Path(os.path.realpath(link)) / "colors.toml"
+    if not colours_path.exists():
+        return {"available": False, "reason": "no theme colors.toml"}
+    try:
+        with open(colours_path, "rb") as fh:
+            data = tomllib.load(fh)
+    except Exception as exc:
+        return {"available": False, "reason": f"unreadable: {exc}"}
+
+    name_file = STATE / "current/theme.name"
+    out = {
+        "available": True,
+        "theme": name_file.read_text().strip() if name_file.exists() else "unknown",
+        "background": data.get("background"),
+        "true_black": str(data.get("background", "")).lower() in ("#000000", "#000"),
+    }
+    for key in ("foreground", "bright_foreground", "accent"):
+        value = data.get(key)
+        if not value or not str(value).startswith("#"):
+            continue
+        out[key] = {
+            "hex": value,
+            "luminance": round(luminance(value), 3),
+            "contrast_on_black": round(contrast_on_black(value), 1),
+            "is_pure_white": str(value).lower() in ("#ffffff", "#fff"),
+        }
+    return out
+
+
+def probe_bar() -> dict:
+    """The status bar: the one surface pinned to the same pixels all session."""
+    out = {"available": False}
+    if have("hyprctl"):
+        for line in run(["hyprctl", "layers"]).splitlines():
+            if "omarchy-bar" in line:
+                m = re.search(r"xywh:\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)", line)
+                if m:
+                    x, y, w, h = (int(v) for v in m.groups())
+                    out = {"available": True, "x": x, "y": y, "width": w, "height": h}
+                break
+    guard = run(["omarchy-shell", "oledguard", "status"])
+    if guard.strip():
+        try:
+            out["guard"] = json.loads(guard)
+        except json.JSONDecodeError:
+            pass
+    return out
+
+
+# --------------------------------------------------------------------- report
+
+def findings(report: dict) -> list:
+    """Only things actually measured. No advice the numbers do not support."""
+    out = []
+    wp = report.get("wallpaper", {})
+    if wp.get("available"):
+        if wp["near_white_pct"] >= 0.5:
+            out.append(("high", f"Wallpaper {wp['name']} is {wp['near_white_pct']}% near-white. "
+                                "Those pixels sit at near-full drive in fixed positions whenever "
+                                "the desktop shows. A darker background is the cheapest fix here."))
+        elif wp["mean_luminance_pct"] >= 5:
+            out.append(("medium", f"Wallpaper {wp['name']} averages {wp['mean_luminance_pct']}% "
+                                  "luminance. No bright peaks, but it is lighting the whole panel "
+                                  "wherever it is visible."))
+        else:
+            out.append(("ok", f"Wallpaper {wp['name']} is dark "
+                              f"({wp['mean_luminance_pct']}% mean, {wp['near_white_pct']}% near-white)."))
+
+    th = report.get("theme", {})
+    if th.get("available"):
+        if not th.get("true_black"):
+            out.append(("medium", f"Background is {th.get('background')}, not #000000. On OLED a "
+                                  "true black switches the pixel off entirely; a dark grey does not."))
+        else:
+            out.append(("ok", "Background is #000000 — those pixels are off."))
+        fg = th.get("foreground")
+        if isinstance(fg, dict):
+            if fg["is_pure_white"]:
+                out.append(("high", "Foreground is pure #ffffff, driving all three emitters flat "
+                                    "out across the largest lit area on the desktop. Dropping to "
+                                    "~#c2c2c2 keeps 12:1 contrast for roughly 45% less light."))
+            else:
+                out.append(("ok", f"Foreground {fg['hex']} at {fg['contrast_on_black']}:1 on black "
+                                  "— readable without running the emitters flat out."))
+
+    bd = report.get("borders", {})
+    if bd.get("available") and isinstance(bd.get("active"), dict):
+        lum = bd["active"]["effective_luminance"]
+        if lum >= 0.2:
+            out.append(("medium", f"Active window border {bd['active']['hex']} emits at "
+                                  f"{lum:.2f} relative luminance. Borders are thin but long, and "
+                                  "on a stable tiling layout they hold still for hours."))
+        else:
+            out.append(("ok", f"Active border {bd['active']['hex']} is subdued ({lum:.2f})."))
+
+    bar = report.get("bar", {})
+    if bar.get("available"):
+        guard = bar.get("guard")
+        if guard and guard.get("active"):
+            out.append(("ok", f"Bar strip {bar['width']}x{bar['height']} is being attenuated "
+                              f"{int(guard.get('attenuation', 0) * 100)}% by OLED Guard."))
+        elif guard:
+            out.append(("medium", f"Bar strip {bar['width']}x{bar['height']} is unattenuated right "
+                                  "now (OLED Guard installed but standing by)."))
+        else:
+            out.append(("medium", f"Bar strip {bar['width']}x{bar['height']} sits in the same pixels "
+                                  "all session with nothing attenuating it. `omarchy toggle bar` "
+                                  "hides it; OLED Guard dims it."))
+    return out
+
+
+def main() -> int:
+    report = {
+        "wallpaper": probe_wallpaper(),
+        "theme": probe_theme(),
+        "borders": probe_borders(),
+        "bar": probe_bar(),
+    }
+
+    if "--json" in sys.argv:
+        report["findings"] = [{"severity": s, "detail": d} for s, d in findings(report)]
+        print(json.dumps(report, indent=2))
+        return 0
+
+    bold, dim, reset = "\033[1m", "\033[2m", "\033[0m"
+    marks = {"high": "\033[33m!\033[0m", "medium": "\033[33m~\033[0m", "ok": "\033[32m+\033[0m"}
+
+    print(f"\n{bold}OLED audit{reset}  {dim}what is costing panel life on this desktop{reset}\n")
+
+    th = report["theme"]
+    if th.get("available"):
+        print(f"  {dim}theme{reset}      {th['theme']}  background {th.get('background')}")
+    wp = report["wallpaper"]
+    if wp.get("available"):
+        print(f"  {dim}wallpaper{reset}  {wp['name']}  "
+              f"mean {wp['mean_luminance_pct']}%  near-white {wp['near_white_pct']}%")
+    bd = report["borders"]
+    if bd.get("available") and isinstance(bd.get("active"), dict):
+        print(f"  {dim}borders{reset}    active {bd['active']['hex']} "
+              f"({bd['active']['effective_luminance']:.2f})  "
+              f"size {bd.get('border_size')}px")
+    bar = report["bar"]
+    if bar.get("available"):
+        print(f"  {dim}bar{reset}        {bar['width']}x{bar['height']} at {bar['x']},{bar['y']}")
+
+    print()
+    for severity, detail in findings(report):
+        print(f"  {marks[severity]} {detail}\n")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

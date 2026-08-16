@@ -1,0 +1,63 @@
+# Dark Matter — a true-black theme for OLED panels.
+#
+# Three rules, each measurable rather than decorative:
+#
+#   1. The background is #000000. On an OLED that is not a dark grey, it is
+#      the pixel switched off: no light, no power, no ageing.
+#   2. Nothing is pure white. #ffffff drives all three emitters flat out, and
+#      body text is the largest lit area on a desktop. The foreground here
+#      still clears 12:1 contrast, far above WCAG AAA, for 45% less light.
+#   3. Colour is spent, not scattered. One hue carries meaning; everything
+#      else is neutral. Blue is the shortest-lived emitter in an OLED stack,
+#      so no large surface is allowed to depend on it.
+
+mode = "dark"
+
+# The single hue. Amber: no blue channel to speak of, and legible at low
+# luminance against true black.
+accent = "#d9822b"
+
+selection = "#171717"
+muted = "#3d3d3d"
+
+# Backgrounds. `background` is the one that matters; the others exist for
+# surfaces that must separate from it and are kept a hair above black rather
+# than lifted into grey.
+background = "#000000"
+darker_background = "#060606"
+dark_background = "#0b0b0b"
+lighter_background = "#171717"
+
+# Foregrounds. `foreground` is body text: 12.0:1 on black.
+# `bright_foreground` is for emphasis only and is still not white.
+foreground = "#c2c2c2"
+dark_foreground = "#626262"
+light_foreground = "#d0d0d0"
+bright_foreground = "#e0e0e0"
+
+# ANSI. Neutral by design: in a terminal these mostly colour syntax, and
+# spending emitter life to distinguish a keyword from a string is a poor
+# trade. Differentiation comes from lightness, which reads on any panel.
+# Orange is the exception and carries the accent.
+red = "#9a9a9a"
+yellow = "#c4c4c4"
+orange = "#d9822b"
+green = "#a8a8a8"
+cyan = "#a2a2a2"
+blue = "#8e8e8e"
+magenta = "#b0b0b0"
+brown = "#5a5a5a"
+
+bright_red = "#b4b4b4"
+bright_yellow = "#d8d8d8"
+bright_green = "#bcbcbc"
+bright_cyan = "#b6b6b6"
+bright_blue = "#a4a4a4"
+bright_magenta = "#c4c4c4"
+
+# Window borders. Thin but long, and on a tiling layout they hold still for as
+# long as the layout does. Left to inherit `accent` they would be the brightest
+# continuously-lit thing on screen after the bar. Neutral and low instead, with
+# the focused one still unmistakable against #000000.
+hyprland_active_border = "#5a5a5a"
+hyprland_inactive_border = "rgba(2e2e2eaa)"
