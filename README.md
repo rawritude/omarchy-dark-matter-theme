@@ -48,6 +48,12 @@ on a tiling layout it holds still for as long as the layout does. Dark Matter
 sets it explicitly to a neutral `#5a5a5a`: unmistakable as a focus cue against
 true black, at roughly a tenth of white's emission.
 
+Measured on a two-window tiling layout, borders turn out to be the *largest*
+static emitter on screen — ahead of the status bar, which is mostly black with
+sparse glyphs while a border is a solid line with every pixel lit. So the
+inactive border is set fully transparent: only the focused window needs one, and
+focus stays unambiguous because exactly one window has a border at all.
+
 **The wallpaper.** Ships a true `#000000` background as the default. This is
 not a detail — the stock Vantablack default (`0-dot-hands.jpg`) is **1.5%
 near-white pixels**, about 78,000 of them at near-full drive in permanently
@@ -58,6 +64,23 @@ fixed positions.
 ```bash
 omarchy theme install https://github.com/rawritude/omarchy-dark-matter-theme.git
 omarchy theme set dark-matter
+```
+
+## Two things worth setting yourself
+
+Neither belongs in a theme — they change window behaviour rather than colour, and
+a theme should not quietly do that. Both go in your own
+`~/.config/hypr/looknfeel.lua`:
+
+```lua
+-- Border emission is perimeter x thickness. Halving the thickness halves the
+-- light while leaving the focus cue perfectly legible. Measured: border pixels
+-- drop from ~29,900 to ~18,400.
+hl.config({ general = { border_size = 1 } })
+
+-- Dims unfocused window *content* (not borders). Measured at 14.7% less total
+-- screen emission on a two-window layout.
+hl.config({ decoration = { dim_inactive = true, dim_strength = 0.30 } })
 ```
 
 ## `oled-audit`

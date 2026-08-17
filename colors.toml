@@ -60,4 +60,10 @@ bright_magenta = "#c4c4c4"
 # continuously-lit thing on screen after the bar. Neutral and low instead, with
 # the focused one still unmistakable against #000000.
 hyprland_active_border = "#5a5a5a"
-hyprland_inactive_border = "rgba(2e2e2eaa)"
+
+# Fully transparent. Only the focused window needs a border, and on a tiling
+# layout the unfocused ones are a solid line of continuously-lit pixels held in
+# one position for as long as the layout lasts -- measured here as the single
+# largest static emitter on screen, ahead of the status bar. Focus is still
+# unambiguous because exactly one window has a border at all.
+hyprland_inactive_border = "rgba(00000000)"
