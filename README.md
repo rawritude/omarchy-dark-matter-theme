@@ -35,6 +35,11 @@ differentiation comes from lightness, which reads on any panel. Blue is the
 shortest-lived emitter in an OLED stack, so no large surface is allowed to
 depend on it.
 
+This reaches further than the terminal. Applications that colour themselves
+through the ANSI palette rather than truecolor inherit it — which is why
+`yellow` here is `#7a7a7a` rather than something bright: it is the slot several
+tools land their status chrome in, and status chrome does not move.
+
 The honest trade-off: **syntax highlighting reads as a greyscale with one
 accent.** If you want a conventional rainbow in your editor, point
 `neovim.lua` at a different colorscheme — the desktop chrome stays Dark Matter.
@@ -66,22 +71,62 @@ omarchy theme install https://github.com/rawritude/omarchy-dark-matter-theme.git
 omarchy theme set dark-matter
 ```
 
-## Two things worth setting yourself
+## Companion settings
 
-Neither belongs in a theme — they change window behaviour rather than colour, and
-a theme should not quietly do that. Both go in your own
-`~/.config/hypr/looknfeel.lua`:
+None of these belong in a theme — they change application behaviour rather than
+colour, and a theme should not quietly do that. They are listed here because
+Dark Matter is what makes them worth having.
+
+**Hyprland** — `~/.config/hypr/looknfeel.lua`:
 
 ```lua
 -- Border emission is perimeter x thickness. Halving the thickness halves the
--- light while leaving the focus cue perfectly legible. Measured: border pixels
--- drop from ~29,900 to ~18,400.
+-- light while leaving the focus cue legible. Measured: border pixels drop from
+-- ~29,900 to ~18,400. On a tiling layout borders are the largest static
+-- emitter on screen, ahead of the status bar.
 hl.config({ general = { border_size = 1 } })
 
 -- Dims unfocused window *content* (not borders). Measured at 14.7% less total
 -- screen emission on a two-window layout.
 hl.config({ decoration = { dim_inactive = true, dim_strength = 0.30 } })
 ```
+
+**herdr** (terminal multiplexer) — `~/.config/herdr/config.toml`:
+
+```toml
+[theme]
+name = "terminal"          # inherit this palette instead of herdr's own
+
+[theme.custom]
+panel_bg    = "black"
+sidebar_bg  = "#000000"    # the sidebar is a tall column held all session
+surface_dim = "#0b0b0b"
+accent      = "#7a7a7a"    # the active tab is a filled block; neutral and dim
+
+[ui]
+hide_tab_bar_when_single_tab = true
+pane_outer_borders = false   # no outer frame, same argument as border_size
+pane_scrollbars    = false   # reclaims a permanently-lit column
+```
+
+Two herdr caveats found the hard way: `panel_bg` is the entire tab-bar
+background rather than just the active tab's text, so it must stay black — which
+is why the accent has to stay light enough for black text to read on it. And
+`fg`/`dim` on `tab_bar_right` entries are accepted by `herdr config check` but
+ignored by the renderer, so the hostname there cannot be darkened, only removed.
+
+**Claude Code** — `~/.claude/settings.json`:
+
+```json
+{ "theme": "dark-ansi" }
+```
+
+`dark-ansi` routes Claude Code's own chrome through the terminal's ANSI palette
+instead of hardcoded truecolor, which is the only thing that brings it under a
+theme's control. Its status line sits in a fixed row at the bottom of a pane for
+an entire session — measured at 1,218 units of emission, roughly 28x a
+bar that OLED Guard is attenuating. Expect its UI to read as greyscale
+afterwards, which is the same bargain this theme already makes for syntax.
 
 ## `oled-audit`
 
@@ -98,7 +143,7 @@ OLED audit  what is costing panel life on this desktop
 
   theme      dark-matter  background #000000
   wallpaper  00-pure-black.png  mean 0.0%  near-white 0.0%
-  borders    active #5a5a5a (0.10)  size 2px
+  borders    active #5a5a5a (0.10)  size 1px
   bar        1440x26 at 0,0
 
   + Wallpaper 00-pure-black.png is dark (0.0% mean, 0.0% near-white).
@@ -106,7 +151,7 @@ OLED audit  what is costing panel life on this desktop
   + Foreground #c2c2c2 at 11.8:1 on black — readable without running the
     emitters flat out.
   + Active border #5a5a5a is subdued (0.10).
-  + Bar strip 1440x26 is being attenuated 25% by OLED Guard.
+  + Bar strip 1440x26 is being attenuated 85% by OLED Guard.
 ```
 
 It checks four things, because those are the four a desktop actually controls:
