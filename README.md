@@ -115,18 +115,21 @@ is why the accent has to stay light enough for black text to read on it. And
 `fg`/`dim` on `tab_bar_right` entries are accepted by `herdr config check` but
 ignored by the renderer, so the hostname there cannot be darkened, only removed.
 
-**Claude Code** — `~/.claude/settings.json`:
+**Claude Code** — nothing worth changing, and the measurement is why.
 
-```json
-{ "theme": "dark-ansi" }
-```
+Its status line sits in a fixed row at the bottom of a pane for a whole session,
+which is exactly the shape that accumulates wear. The obvious target is the amber
+`auto mode on` text. Measured, that amber is **227 units — 31% of the line, and
+18% of what plain window borders emit.** The other 69% of the line is neutral
+grey that no theme setting reaches.
 
-`dark-ansi` routes Claude Code's own chrome through the terminal's ANSI palette
-instead of hardcoded truecolor, which is the only thing that brings it under a
-theme's control. Its status line sits in a fixed row at the bottom of a pane for
-an entire session — measured at 1,218 units of emission, roughly 28x a
-bar that OLED Guard is attenuating. Expect its UI to read as greyscale
-afterwards, which is the same bargain this theme already makes for syntax.
+The only lever is the `dark-ansi` theme, which routes *all* of Claude Code's
+chrome through the ANSI palette. With a near-monochrome palette like this one
+that means the whole tool goes greyscale. Trading every colour in your primary
+editor for 227 units is not a good deal, so this theme does not ask you to.
+
+Worth stating because it is the general lesson: an element being static does not
+make it worth attacking. Check its area first.
 
 ## `oled-audit`
 
