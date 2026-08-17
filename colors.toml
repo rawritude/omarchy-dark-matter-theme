@@ -40,7 +40,13 @@ bright_foreground = "#e0e0e0"
 # trade. Differentiation comes from lightness, which reads on any panel.
 # Orange is the exception and carries the accent.
 red = "#9a9a9a"
-yellow = "#c4c4c4"
+
+# Yellow was the brightest entry in this palette -- brighter than the body text
+# it sits beside, which is hard to defend in a theme whose whole argument is
+# that nothing should be driven harder than it needs to be. It is also the slot
+# Claude Code's status line resolves to under its `dark-ansi` theme, so it burns
+# in a fixed row at the bottom of a pane for a whole session.
+yellow = "#7a7a7a"
 orange = "#d9822b"
 green = "#a8a8a8"
 cyan = "#a2a2a2"
@@ -49,7 +55,7 @@ magenta = "#b0b0b0"
 brown = "#5a5a5a"
 
 bright_red = "#b4b4b4"
-bright_yellow = "#d8d8d8"
+bright_yellow = "#9a9a9a"
 bright_green = "#bcbcbc"
 bright_cyan = "#b6b6b6"
 bright_blue = "#a4a4a4"
