@@ -143,7 +143,7 @@ OLED audit  what is costing panel life on this desktop
 
   theme      dark-matter  background #000000
   wallpaper  00-pure-black.png  mean 0.0%  near-white 0.0%
-  borders    active #5a5a5a (0.10)  size 1px
+  borders    active #5a5a5a (0.10)  size 1px  12,456 lit px  1,273 units
   bar        1440x26 at 0,0
 
   + Wallpaper 00-pure-black.png is dark (0.0% mean, 0.0% near-white).
@@ -151,6 +151,10 @@ OLED audit  what is costing panel life on this desktop
   + Foreground #c2c2c2 at 11.8:1 on black — readable without running the
     emitters flat out.
   + Active border #5a5a5a is subdued (0.10).
+  + Borders light 12,456 pixels at 1px thickness, emitting 1,273 units.
+    Border area is perimeter x thickness, so halving the thickness halves
+    the light.
+  + Unfocused windows draw no border; only the focused one does.
   + Bar strip 1440x26 is being attenuated 85% by OLED Guard.
 ```
 
@@ -160,7 +164,7 @@ It checks four things, because those are the four a desktop actually controls:
 |---|---|---|
 | wallpaper | mean luminance **and** near-white share | mean alone is misleading — diffuse light spreads wear, concentrated static peaks accumulate it in fixed pixels |
 | theme | background, foreground contrast and luminance | catches pure-white foregrounds and near-black-but-not-black backgrounds |
-| borders | colour, alpha, effective luminance | composited against black, so alpha counts |
+| borders | colour, alpha, thickness, **lit area and total emission**, active and inactive separately | measured on a tiling layout these are the largest static emitter on screen, ahead of the bar — a bar is mostly black with sparse glyphs, a border is a solid line with every pixel lit |
 | bar | geometry, and whether anything is attenuating it | the one surface pinned to the same pixels all session |
 
 Run it against a stock theme and it will tell you what it finds. Pointed at

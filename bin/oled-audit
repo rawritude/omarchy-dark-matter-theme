@@ -95,7 +95,15 @@ def probe_wallpaper() -> dict:
 
 
 def probe_borders() -> dict:
-    """Window borders: thin, but long, and static for as long as the layout is."""
+    """Window borders: thin, but long, and static for as long as the layout is.
+
+    Measured on a two-window tiling layout these came out as the *largest*
+    static emitter on screen, ahead of the status bar -- a bar strip is mostly
+    black with sparse glyphs, while a border is a solid line with every pixel
+    lit. So this reports area and total emission, not just the colour: the
+    colour alone hides that halving `border_size` halves the light, and that an
+    unfocused window's border is pure cost.
+    """
     if not have("hyprctl"):
         return {"available": False, "reason": "hyprctl not found"}
 
@@ -104,15 +112,20 @@ def probe_borders() -> dict:
         m = re.search(r"([0-9a-f]{8})", out)
         return m.group(1) if m else None
 
-    active = colour_of("col.active_border")
-    inactive = colour_of("col.inactive_border")
-    size = re.search(r"int:\s*(\d+)", run(["hyprctl", "getoption", "general:border_size"]))
+    size_m = re.search(r"int:\s*(\d+)", run(["hyprctl", "getoption", "general:border_size"]))
+    border_size = int(size_m.group(1)) if size_m else 0
+    result = {"available": True, "border_size": border_size}
 
-    result = {"available": True, "border_size": int(size.group(1)) if size else None}
-    for label, raw in (("active", active), ("inactive", inactive)):
+    for label, raw in (("active", colour_of("col.active_border")),
+                       ("inactive", colour_of("col.inactive_border"))):
         if not raw:
+            # hyprland prints a fully transparent border as plain "0", which the
+            # 8-digit match above will not catch. Record it as drawn-but-dark
+            # rather than dropping the key, so a zero here is a measurement and
+            # not an accident of parsing.
+            result[label] = {"hex": None, "alpha": 0.0, "effective_luminance": 0.0,
+                             "note": "not drawn"}
             continue
-        # hyprland reports AARRGGBB
         alpha, rgb = int(raw[:2], 16) / 255.0, "#" + raw[2:]
         result[label] = {
             "hex": rgb,
@@ -121,6 +134,55 @@ def probe_borders() -> dict:
             # is the colour's luminance scaled by how opaque it is.
             "effective_luminance": round(luminance(rgb) * alpha, 4),
         }
+
+    # Area needs real window geometry. Border area for one window is its
+    # perimeter times thickness; whether it is drawn in the active or inactive
+    # colour depends on focus, so both are counted separately.
+    try:
+        clients = json.loads(run(["hyprctl", "clients", "-j"]) or "[]")
+    except json.JSONDecodeError:
+        clients = []
+    focused = run(["hyprctl", "activewindow", "-j"])
+    try:
+        focused_addr = json.loads(focused).get("address") if focused.strip() else None
+    except json.JSONDecodeError:
+        focused_addr = None
+
+    scale = 1.0
+    try:
+        mons = json.loads(run(["hyprctl", "monitors", "-j"]) or "[]")
+        if mons:
+            scale = float(mons[0].get("scale") or 1.0)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        pass
+
+    tiled = [c for c in clients if not c.get("hidden") and c.get("mapped", True)]
+    counts = {"active": 0, "inactive": 0}
+    for c in tiled:
+        w, h = (c.get("size") or [0, 0])[:2]
+        if not w or not h or border_size <= 0:
+            continue
+        # Physical pixels: the ring between the outer and inner rectangle.
+        bw = border_size
+        area = ((w + 2 * bw) * (h + 2 * bw) - w * h) * (scale ** 2)
+        key = "active" if c.get("address") == focused_addr else "inactive"
+        counts[key] += int(area)
+
+    emission = 0.0
+    for key, px in counts.items():
+        band = result.get(key)
+        if band:
+            emission += px * band["effective_luminance"]
+    # Pixels a border *occupies* and pixels it actually lights are different
+    # numbers once an inactive border is transparent, and only the lit ones cost
+    # anything, so do not conflate them.
+    lit_px = sum(px for key, px in counts.items()
+                 if (result.get(key) or {}).get("effective_luminance", 0) > 0)
+    result["window_count"] = len(tiled)
+    result["border_px"] = {k: v for k, v in counts.items()}
+    result["occupied_border_px"] = sum(counts.values())
+    result["lit_border_px"] = lit_px
+    result["total_emission"] = round(emission, 1)
     return result
 
 
@@ -215,12 +277,32 @@ def findings(report: dict) -> list:
     bd = report.get("borders", {})
     if bd.get("available") and isinstance(bd.get("active"), dict):
         lum = bd["active"]["effective_luminance"]
+        px = bd.get("lit_border_px", 0)
+        emis = bd.get("total_emission", 0)
+        size = bd.get("border_size") or 0
         if lum >= 0.2:
             out.append(("medium", f"Active window border {bd['active']['hex']} emits at "
                                   f"{lum:.2f} relative luminance. Borders are thin but long, and "
                                   "on a stable tiling layout they hold still for hours."))
         else:
             out.append(("ok", f"Active border {bd['active']['hex']} is subdued ({lum:.2f})."))
+
+        if px:
+            out.append(("ok" if size <= 1 else "medium",
+                        f"Borders light {px:,} pixels at {size}px thickness, emitting {emis:,.0f} "
+                        "units. Border area is perimeter x thickness, so halving the thickness "
+                        "halves the light."
+                        + ("" if size <= 1 else " `border_size = 1` is the cheapest win here.")))
+
+        ina = bd.get("inactive")
+        if isinstance(ina, dict):
+            if ina.get("effective_luminance", 0) > 0:
+                share = bd.get("border_px", {}).get("inactive", 0)
+                out.append(("medium", f"Unfocused windows still draw a border ({ina['hex']}), "
+                                      f"{share:,} lit pixels earning nothing -- only the focused "
+                                      "window needs one. Set the inactive border transparent."))
+            else:
+                out.append(("ok", "Unfocused windows draw no border; only the focused one does."))
 
     bar = report.get("bar", {})
     if bar.get("available"):
@@ -267,7 +349,8 @@ def main() -> int:
     if bd.get("available") and isinstance(bd.get("active"), dict):
         print(f"  {dim}borders{reset}    active {bd['active']['hex']} "
               f"({bd['active']['effective_luminance']:.2f})  "
-              f"size {bd.get('border_size')}px")
+              f"size {bd.get('border_size')}px  "
+              f"{bd.get('lit_border_px', 0):,} lit px  {bd.get('total_emission', 0):,.0f} units")
     bar = report["bar"]
     if bar.get("available"):
         print(f"  {dim}bar{reset}        {bar['width']}x{bar['height']} at {bar['x']},{bar['y']}")
